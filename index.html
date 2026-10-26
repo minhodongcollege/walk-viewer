@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Walk Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #c8d2dc; color: #fff; font: 13px/1.45 -apple-system, system-ui, sans-serif; user-select: none }
+  canvas { display: block; outline: none }
+  .hud { position: fixed; background: rgba(20, 24, 30, .64); padding: 8px 11px; border-radius: 7px }
+  #info { top: 12px; left: 12px; max-width: calc(50vw - 190px) } /* stays clear of the centred hint */
+  #name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere }
+  #where, #knobs output { font-variant-numeric: tabular-nums }
+  #where { opacity: .85; white-space: pre-line }
+  #set { white-space: pre-line; margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .25) }
+  #set:empty { display: none }
+  #knobs { top: 12px; right: 12px; display: grid; grid-template-columns: auto 120px 2.6em; gap: 6px 8px; align-items: center }
+  #knobs output { text-align: right }
+  #knobs button { grid-column: 1 / -1; font: inherit; color: #fff; background: rgba(255, 255, 255, .14); border: 0; border-radius: 5px; padding: 5px; cursor: pointer }
+  #knobs button:hover { background: rgba(255, 255, 255, .24) }
+  #keys { bottom: 12px; left: 12px }
+  kbd { font: inherit; background: rgba(255, 255, 255, .16); border-radius: 4px; padding: 0 5px }
+  #hint { top: 12px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; font-size: 14px; font-weight: 600 }
+  #hint small { display: block; font-size: 12px; font-weight: 400; opacity: .8 }
+  #cross { position: fixed; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; pointer-events: none; display: none; mix-blend-mode: difference;
+    background: linear-gradient(#fff, #fff) center / 2px 100% no-repeat, linear-gradient(#fff, #fff) center / 100% 2px no-repeat }
+  body.locked #cross { display: block }
+  body.locked #hint { display: none }
+  #msg { bottom: 82px; left: 50%; transform: translateX(-50%); max-width: 60vw }
+  #msg.err { background: rgba(160, 30, 30, .85) }
+  #msg a { color: #fff; font-weight: 600 }
+  #drop { position: fixed; inset: 10px; display: none; align-items: center; justify-content: center; border: 3px dashed #fff; border-radius: 14px; background: rgba(20, 24, 30, .35); font-size: 22px; pointer-events: none }
+  body.drag #drop { display: flex }
+  /* Phone / tablet: Minecraft Pocket Edition style. Joystick left, drag right to look, jump, hotbar of places. */
+  #pad, #fly, #turn, #title { display: none }
+  body:not(.touch) .mc { display: none !important }
+  body.touch { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none }
+  body.touch #info, body.touch #knobs, body.touch #keys, body.touch #hint, body.touch #cross { display: none }
+  body.touch #pad, body.touch #fly, body.touch #title { display: block }
+  body.touch #msg { bottom: auto; top: 50%; transform: translate(-50%, -50%) }
+  #pad { position: fixed; inset: 0; touch-action: none }
+  .mc { position: fixed; box-sizing: border-box; background: rgba(60, 60, 60, .55); border: 3px solid rgba(255, 255, 255, .55); color: #fff; font-weight: 700; letter-spacing: .5px; text-shadow: 1px 1px 0 #222; touch-action: none }
+  #joy { left: calc(34px + env(safe-area-inset-left)); bottom: calc(28px + env(safe-area-inset-bottom)); width: 124px; height: 124px; border-radius: 50%; pointer-events: none; transition: opacity .2s }
+  #joy i { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(255, 255, 255, .55); border: 3px solid rgba(255, 255, 255, .8) }
+  #jump, #down { right: calc(34px + env(safe-area-inset-right)); bottom: calc(40px + env(safe-area-inset-bottom)); width: 78px; height: 78px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px }
+  #down { bottom: calc(130px + env(safe-area-inset-bottom)); display: none; width: 60px; height: 60px }
+  body.flying #down { display: flex }
+  #jump.on, #down.on, #fly.on { background: rgba(255, 255, 255, .5) }
+  #fly { top: calc(12px + env(safe-area-inset-top)); right: calc(14px + env(safe-area-inset-right)); padding: 8px 12px; font-size: 12px }
+  #title { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: calc(14px + env(safe-area-inset-left)); font-size: 13px; font-weight: 700; text-shadow: 1px 1px 0 #222, 0 0 6px rgba(0,0,0,.5); pointer-events: none }
+  #title small { display: block; font-weight: 400; font-size: 11px; opacity: .9; transition: opacity 1s }
+  #bar { position: fixed; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 0; background: rgba(40, 40, 40, .6); border: 3px solid rgba(20, 20, 20, .8) }
+  #bar button { all: unset; box-sizing: border-box; width: 46px; height: 46px; border: 3px solid rgba(139, 139, 139, .9); background: rgba(100, 100, 100, .35); color: #fff; font: 700 9px/1.1 system-ui, sans-serif; text-align: center; text-shadow: 1px 1px 0 #222; display: flex; flex-direction: column; align-items: center; justify-content: center; touch-action: none }
+  #bar button b { font-size: 16px }
+  #bar button.sel { border-color: #fff; background: rgba(255, 255, 255, .3) }
+  #turn { position: fixed; inset: 0; z-index: 9; background: #222; color: #fff; align-items: center; justify-content: center; text-align: center; font-size: 20px; font-weight: 600 }
+  @media (orientation: portrait) { body.touch #turn { display: flex } }
+  /* Build mode (v4, the map): hotbar + all-pieces inventory + hold-to-break ring + Save. Shown only when the model has pieces. */
+  #hot, #build, #ring, #hotName, #keysB { display: none }
+  body.build #hot { display: flex } body.build #build { display: flex } body.build #keysB { display: block }
+  body.build.locked #ring, body.touch.build #ring { display: block } body.build #hotName { display: block }
+  body.touch.build #cross { display: block }
+  body.build #keys { bottom: 82px } body.build:not(.touch) #msg { bottom: 140px }
+  #hot { position: fixed; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: rgba(40, 40, 40, .6); border: 3px solid rgba(20, 20, 20, .8) }
+  .slot { all: unset; box-sizing: border-box; position: relative; width: 52px; height: 52px; border: 3px solid rgba(139, 139, 139, .9); background: rgba(100, 100, 100, .35) center / cover no-repeat;
+    color: #fff; font: 700 10px/1 system-ui, sans-serif; text-shadow: 1px 1px 0 #222; cursor: pointer; touch-action: none }
+  .slot span { position: absolute; left: 3px; top: 3px }
+  .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255, 255, 255, .6) }
+  .slot.more { font-size: 20px; display: flex; align-items: center; justify-content: center }
+  body.touch .slot { width: 42px; height: 42px }
+  #hotName { position: fixed; left: 50%; bottom: calc(70px + env(safe-area-inset-bottom)); transform: translateX(-50%); font-weight: 700; text-shadow: 1px 1px 0 #222, 0 0 6px rgba(0, 0, 0, .6); pointer-events: none }
+  body.touch #hotName { bottom: calc(58px + env(safe-area-inset-bottom)) }
+  #ring { position: fixed; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; pointer-events: none; --p: 0; opacity: calc(var(--p) * 100);
+    background: conic-gradient(rgba(255, 255, 255, .95) calc(var(--p) * 360deg), rgba(0, 0, 0, .3) 0); -webkit-mask: radial-gradient(circle, transparent 12px, #000 13px); mask: radial-gradient(circle, transparent 12px, #000 13px) }
+  #build { position: fixed; top: 132px; right: 12px; gap: 6px }
+  #build button { font: 600 13px system-ui, sans-serif; color: #fff; background: rgba(20, 24, 30, .64); border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer }
+  #build button.dirty { background: #2f9e44 }
+  body.touch #build { top: calc(56px + env(safe-area-inset-top)); right: calc(14px + env(safe-area-inset-right)) }
+  body.touch #build button { border-radius: 0; background: rgba(60, 60, 60, .55); border: 3px solid rgba(255, 255, 255, .55); font: 700 12px system-ui; text-shadow: 1px 1px 0 #222; padding: 6px 10px }
+  body.touch #build button.dirty { background: rgba(47, 158, 68, .85) }
+  body:not(.touch) #map, body.noplaces #map { display: none }
+  body.build #bar { bottom: calc(66px + env(safe-area-inset-bottom)) }
+  body.touch.build:not(.places) #bar { display: none }
+  #inv { position: fixed; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .45) }
+  #inv[hidden] { display: none }
+  #invBox { background: #c6c6c6; color: #222; border: 4px solid #555; padding: 12px 14px; box-sizing: border-box; width: min(720px, 92vw); max-height: 86vh; overflow: auto; position: relative }
+  #invBox small { opacity: .7; margin-left: 6px }
+  #invX { all: unset; position: absolute; right: 10px; top: 6px; font-size: 20px; cursor: pointer; padding: 0 6px }
+  #invGrid { display: grid; grid-template-columns: repeat(auto-fill, 84px); gap: 6px; margin-top: 10px }
+  #invGrid button { all: unset; cursor: pointer; background: #8b8b8b; border: 3px solid #555; text-align: center; font: 600 10px/1.15 system-ui; color: #fff; text-shadow: 1px 1px 0 #222; padding-bottom: 4px }
+  #invGrid button:hover, #invGrid button.on { border-color: #fff }
+  #invGrid img { display: block; width: 78px; height: 78px; margin-bottom: 3px }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }</script>
+</head>
+<body>
+<script>if (location.protocol === 'file:') document.write('<p style="padding:2em;color:#222;font-size:16px">Double-click <b>Open Walk Viewer.command</b> in the Walk Viewer folder instead: it starts the viewer and opens it at <a href="http://localhost:5240/">localhost:5240</a>. Browsers block a double-clicked page from reading model files.</p>')</script>
+<div id="info" class="hud"><div id="name">No model yet</div><div id="size"></div><div id="where"></div><div id="set"></div></div>
+<div id="knobs" class="hud">
+  <label for="speed">Speed</label><input id="speed" type="range" min="-3" max="3" step="1" value="0"><output id="speedOut">1×</output>
+  <label for="look">Look</label><input id="look" type="range" min="0.2" max="2" step="0.1"><output id="lookOut"></output>
+  <button id="open">Open model…</button>
+  <input id="file" type="file" multiple accept=".glb,.gltf,.json,.bin,.png,.jpg,.jpeg,.webp" hidden>
+</div>
+<div id="keys" class="hud"><kbd>Click</kbd> look &nbsp; <kbd>Esc</kbd> let go &nbsp; <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp; <kbd>Space</kbd> up &nbsp; <kbd>Shift</kbd> down &nbsp; <kbd>Scroll</kbd> or <kbd>−</kbd><kbd>+</kbd> speed &nbsp; <kbd>R</kbd> start view<br>
+  <kbd>Z</kbd> held + <kbd>W</kbd><kbd>S</kbd> or <kbd>Scroll</kbd> dolly zoom &nbsp; <kbd>F</kbd> FOV back to 60° &nbsp; <kbd>P</kbd> replay the dolly zoom + video &nbsp; <kbd>T</kbd> turn the prop you aim at
+  <div id="keysB"><b>Build:</b> <kbd>hold click</kbd> break &nbsp; <kbd>right click</kbd> place (it faces you) &nbsp; <kbd>1</kbd>–<kbd>9</kbd> or <kbd>Scroll</kbd> slot &nbsp; <kbd>0</kbd> empty hand &nbsp; <kbd>E</kbd> all pieces &nbsp; <kbd>W</kbd><kbd>W</kbd> run &nbsp; <kbd>Space</kbd><kbd>Space</kbd> fly on/off &nbsp; <b>Save</b> keeps your changes</div></div>
+<div id="hint" class="hud">Click the view to look around<small>Drop .glb / .gltf models, a StoryArc floorplan .json, or both (props go into their boxes)</small></div>
+<div id="cross"></div>
+<div id="pad"></div>
+<div id="title"><span id="titleText"></span><small id="tip">Left thumb walks · right thumb looks</small></div>
+<div id="joy" class="mc touchui"><i></i></div>
+<button id="jump" class="mc">JUMP</button><button id="down" class="mc">DOWN</button>
+<button id="fly" class="mc">FLY: OFF</button>
+<div id="bar" class="mc"></div>
+<div id="hotName"></div><div id="hot"></div><div id="ring"></div>
+<div id="build"><button id="save" title="Keep your changes (they're lost on reload until you save)">Save</button><button id="reset" title="Back to the original street (then Save to keep it)">Start over</button><button id="map">MAP</button></div>
+<div id="inv" hidden><div id="invBox"><b>All pieces</b><small>pick one to put it in the selected slot</small><button id="invX" aria-label="Close">✕</button><div id="invGrid"></div></div></div>
+<div id="turn">Turn your phone sideways<br>to walk the street</div>
+<div id="msg" class="hud" hidden></div>
+<div id="drop">Drop to load</div>
+
+<script type="module">
+import * as THREE from 'three'
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+
+const $ = id => document.getElementById(id)
+const DEFAULT_WORLD = 'models/sample-street.glb' // what opens with no ?model= (the GitHub copy opens models/sample-street.glb)
+const BG = 0xc8d2dc, { degToRad: rad, radToDeg: deg, clamp } = THREE.MathUtils
+
+const renderer = new THREE.WebGLRenderer({ antialias: true })
+const touch = new URLSearchParams(location.search).has('touch') || matchMedia('(pointer: coarse)').matches // phones and tablets: Minecraft-style controls
+if (touch) document.body.classList.add('touch')
+renderer.setPixelRatio(Math.min(devicePixelRatio, touch ? 1.5 : 2))
+renderer.setSize(innerWidth, innerHeight)
+renderer.toneMapping = THREE.NeutralToneMapping
+document.body.prepend(renderer.domElement)
+
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(BG)
+scene.fog = new THREE.Fog(BG, 1, 2) // distances set per model in frame()
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture // soft studio light, makes PBR materials read right
+const sun = new THREE.DirectionalLight(0xffffff, 1.2)
+sun.position.set(0.5, 1, 0.8) // only the direction matters
+scene.add(sun)
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 1000)
+camera.filmGauge = 36 // the lens mm on screen = a full-frame camera, 36 mm wide (same as Blender's default camera)
+const controls = new PointerLockControls(camera, renderer.domElement)
+
+// Loading. Dropped files become blob URLs; a dropped .gltf finds its .bin and textures by file name.
+let blobs = new Map()
+const manager = new THREE.LoadingManager()
+manager.setURLModifier(url => url.startsWith('blob:') ? blobs.get(decodeURIComponent(url.split('/').pop())) ?? url : url)
+const loader = new GLTFLoader(manager)
+  .setDRACOLoader(new DRACOLoader().setDecoderPath('vendor/three/examples/jsm/libs/draco/gltf/'))
+  .setMeshoptDecoder(MeshoptDecoder)
+
+let model = new THREE.Group(), grids = [], radius = 1, base = 1, step = 0, unit = ['m', 1]
+const start = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() }
+scene.add(model)
+
+async function load(items) { // items: [{ name, url }], all shown together, replacing the current model
+  const names = items.map(i => i.name).join(', ')
+  try {
+    const next = new THREE.Group(), props = []
+    for (const { name, url } of items) {
+      msg(`Loading ${name}…`)
+      if (/\.json$/i.test(name)) { // a StoryArc floorplan
+        next.add(floorplan(await fetch(url).then(r => r.ok ? r.json() : Promise.reject(Error(`${r.status} ${r.statusText}`)))))
+        next.userData.storyArc = true
+        continue
+      }
+      const glb = (await loader.loadAsync(url, e => e.total && msg(`Loading ${name}… ${Math.round(100 * e.loaded / e.total)}%`))).scene
+      if (glb.userData.storyArc) next.userData.storyArc = true // a whole set saved by assemble_set.py
+      if (glb.userData.walk_viewer) try { next.userData.meta = JSON.parse(glb.userData.walk_viewer) } catch {}
+      props.push({ name, glb, slots: [] })
+    }
+    assemble(next, props)
+    for (const p of props) if (!p.slots.length) next.add(p.glb) // no floorplan box for it: it stays at its own position
+    scene.remove(model); dispose(model)
+    model = next; scene.add(model)
+    frame(names); showSet(); msg('')
+    PLACES = model.userData.meta?.places ?? []; drawPlaces()
+    $('titleText').textContent = model.userData.meta?.title ?? names.replace(/\.(glb|gltf|json)\b/gi, '')
+    collect(); initBuild(names)
+    const s = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3())
+    setFly(Math.max(s.x, s.z) < 4); if (walk) spawn(0) // one rule (also the MCP tool's): 4 m or wider = walk with gravity, smaller = fly around it
+    if (startCam) { // ?cam=x,y,z,yaw,pitch[,fov]: start at a given view (the MCP tool's "open in browser" sends its camera here)
+      const [x, y, z, yaw, pitch, fov] = startCam; startCam = null
+      camera.position.set(x, y, z); camera.quaternion.setFromEuler(euler.set(rad(pitch), rad(yaw), 0)); if (fov) setFov(fov)
+      if (walk) { const g = groundAt(x, y, z); if (g === undefined || y - EYE - g > 0.3) setFly(true); else { foot = y - EYE; vy = 0 } } // up in the air: fly there instead of falling
+    }
+    viewer.loaded = names
+  } catch (e) {
+    console.error(e)
+    msg(`Couldn't load ${names}: ${e.message || e}`, true)
+  }
+}
+
+function dispose(root) {
+  root.traverse(o => {
+    o.geometry?.dispose()
+    for (const m of [o.material].flat().filter(Boolean)) { for (const v of Object.values(m)) if (v?.isTexture) v.dispose(); m.dispose() }
+  })
+}
+
+// StoryArc floorplan export (Locations → Floorplan → Download JSON): floor, see-through walls, a labelled box per prop.
+// StoryArc's plan is mirrored compared with three.js, so z is flipped to look like StoryArc's 3D view.
+// The HUD flips it back, so "you are at" reads in StoryArc's own floorplan coordinates.
+function floorplan(json) {
+  const fp = json.floorplan, room = fp?.roomDimensions
+  if (!fp?.wallCoordinates?.walls || !room) throw Error('not a StoryArc floorplan JSON')
+  const g = new THREE.Group()
+  g.scale.z = -1
+  const box = (to, s, color, opacity = 1) => to.add(new THREE.Mesh(new THREE.BoxGeometry(s.x, s.y, s.z),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.85, transparent: opacity < 1, opacity, depthWrite: opacity === 1 }))).children.at(-1)
+  box(g, { x: room.width, y: 0.02, z: room.depth }, 0xb9a27e).position.y = -0.01 // floor
+  for (const w of fp.wallCoordinates.walls) {
+    const dx = w.end.x - w.start.x, dz = w.end.z - w.start.z
+    const m = box(g, { x: Math.hypot(dx, dz), y: w.height, z: 0.08 }, 0xf2f2f2, 0.3)
+    m.position.set((w.start.x + w.end.x) / 2, w.height / 2, (w.start.z + w.end.z) / 2)
+    m.rotation.y = -Math.atan2(dz, dx)
+    m.userData.wall = true // see-through, so the crosshair aims past it
+  }
+  for (const o of json.objects ?? []) { // props, doors and windows: position = box centre, size = box, rotation in radians
+    const { position: p, rotation: r, size: s } = o.transform, slot = new THREE.Group() // a prop GLB with a matching name can take the box's place
+    slot.position.set(p.x, p.y, p.z); slot.rotation.set(r.x, r.y, r.z)
+    slot.userData = { slot: o.objectName, id: o.id ?? o.objectName, size: s, box: box(slot, s, colorOf(o.color)) }
+    const tag = label(o.objectName)
+    tag.position.y = s.y / 2 + 0.1
+    g.add(slot.add(tag))
+  }
+  return g
+}
+// StoryArc colours are hex for doors/windows, words for props ("Black frame with silver trim") → first CSS colour word, else grey
+const colorOf = c => /^#[0-9a-f]{6}$/i.test(c) ? c : (c ?? '').toLowerCase().match(/[a-z]+/g)?.find(w => w in THREE.Color.NAMES) ?? '#a7b0b9'
+
+// Rebuilding a set from StoryArc downloads: each floorplan box takes the prop GLB with the closest name, stretched to fill it
+// (StoryArc's Make 3D meshes aren't real size, its floorplan boxes are). One GLB can fill several boxes (two shelves).
+function assemble(root, props) {
+  const slots = []
+  root.traverse(o => o.userData.slot && slots.push(o))
+  if (!slots.length || !props.length) return
+  root.userData.props = props // for the on-screen list
+  for (const slot of slots) {
+    let best = 0, prop
+    for (const p of props) { const l = likeness(p.name, slot.userData.slot); if (l > best) [best, prop] = [l, p] }
+    if (!prop) continue
+    Object.assign(slot.userData, { model: prop.glb.clone(), turn: +localStorage['walkTurn:' + slot.userData.id] || 0 })
+    prop.slots.push(slot)
+    fit(slot)
+  }
+}
+// Names match when every word of the shorter one is in the other ("refrigerator" ⊂ "beverage-refrigerator.glb"; plural s, numbers,
+// case and the file extension ignored). The closest pair wins (shared words / all words), so "cash register" beats "register".
+const words = s => new Set(s.toLowerCase().replace(/\.(glb|gltf)$/, '').match(/\p{L}+/gu)?.map(w => w.replace(/s$/, '')))
+function likeness(a, b) {
+  const A = words(a), B = words(b), shared = [...A].filter(w => B.has(w)).length
+  return shared && shared === Math.min(A.size, B.size) ? shared / (A.size + B.size - shared) : 0
+}
+// A prop in its box: turned (T key, 90° steps), centred, stretched to the box. The floorplan group is mirrored in z (StoryArc's plan
+// is left-handed), so x is flipped here too: two mirrors make a 180° turn, so the model isn't mirrored and faces the way StoryArc's
+// 3D view shows it (the fridge faces into the shop).
+function fit(slot) {
+  const u = slot.userData, turn = new THREE.Group(), f = new THREE.Group(), k = (want, have) => have > 1e-6 ? want / have : 1 // flat models keep that size
+  slot.remove(u.box, u.fit)
+  turn.rotation.y = u.turn * Math.PI / 2
+  const b = new THREE.Box3().setFromObject(turn.add(u.model)), size = b.getSize(new THREE.Vector3())
+  f.scale.set(-k(u.size.x, size.x), k(u.size.y, size.y), k(u.size.z, size.z))
+  f.position.copy(b.getCenter(new THREE.Vector3())).multiply(f.scale).negate()
+  slot.add(u.fit = f.add(turn))
+}
+function showSet() { // on screen: which GLB went into which box, and which found none
+  $('set').textContent = (model.userData.props ?? []).map(p => `${p.name} → ${p.slots.length
+    ? p.slots.map(s => s.userData.slot + (s.userData.turn ? ` (turned ${s.userData.turn * 90}°)` : '')).join(', ')
+    : 'no match, left at its own spot'}`).join('\n')
+}
+// T: turn the prop under the crosshair 90° in its box, for a model that faces the wrong way. Remembered per box (StoryArc's id).
+function turnProp() {
+  let o = aim().object
+  while (o && !o.userData.fit) o = o.parent
+  if (!o) return msg('Aim the crosshair at a prop from a GLB to turn it', false, 2500)
+  o.userData.turn = (o.userData.turn + 1) % 4
+  localStorage['walkTurn:' + o.userData.id] = o.userData.turn
+  fit(o); showSet()
+}
+
+const ray = new THREE.Raycaster(), mid = new THREE.Vector2()
+function aim() { // what the crosshair is on: the first surface (not see-through walls or labels), else a point ahead
+  camera.updateMatrixWorld(); ray.setFromCamera(mid, camera) // the camera may have moved since the last frame
+  return ray.intersectObject(model).find(h => h.object.isMesh && !h.object.userData.wall) ?? { point: ray.ray.at(radius, new THREE.Vector3()) }
+}
+
+function label(text) {
+  const c = document.createElement('canvas'), x = c.getContext('2d'), font = '600 40px system-ui, sans-serif'
+  x.font = font; c.width = Math.ceil(x.measureText(text).width) + 28; c.height = 56
+  x.font = font; x.fillStyle = 'rgba(20, 24, 30, .78)'; x.roundRect(0, 0, c.width, c.height, 12); x.fill()
+  x.fillStyle = '#fff'; x.textBaseline = 'middle'; x.fillText(text, 14, 30)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, sizeAttenuation: false })) // same size on screen at any distance
+  s.scale.set(0.035 * c.width / c.height, 0.035, 1)
+  return s
+}
+
+// The model keeps its own position and size (glTF = metres), so x/y/z match Blender and StoryArc.
+// Everything else follows its size: speed, grid, fog, clipping and the start view.
+function frame(names) {
+  const box = new THREE.Box3().setFromObject(model)
+  if (box.isEmpty()) box.set(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 3, 5)) // nothing loaded: a room-sized space
+  const size = box.getSize(new THREE.Vector3()), { center: c, radius: r } = box.getBoundingSphere(new THREE.Sphere())
+  radius = r; base = r / 6 // at 1× you cross the model (2r) in ~12 s
+  unit = r < 0.5 ? ['cm', 100] : ['m', 1]
+  camera.near = r / 300; camera.far = r * 100; camera.updateProjectionMatrix()
+  scene.fog.near = r * 6; scene.fog.far = r * 40
+  start.pos.copy(c).addScaledVector(new THREE.Vector3(0.45, 0.35, 1).normalize(), r * 2.3) // front, a bit right and above, all in view
+  camera.position.copy(start.pos); camera.lookAt(c); start.quat.copy(camera.quaternion)
+  vel.set(0, 0, 0); setFov(60); stop(play?.rec); dolly = lastDolly = play = null
+  grid(box.min.y, c, r)
+  let tris = 0
+  model.traverse(o => { if (o.isMesh) tris += (o.geometry.index ?? o.geometry.attributes.position).count / 3 })
+  const f = n => (n * unit[1]).toFixed(unit[1] === 100 || n < 10 ? 1 : 0)
+  $('name').textContent = names || 'No model yet'
+  $('size').textContent = names ? `${f(size.x)} × ${f(size.y)} × ${f(size.z)} ${unit[0]} · ${Math.round(tris).toLocaleString()} triangles${model.userData.storyArc ? ' · StoryArc coordinates' : ''}` : 'Drop a .glb or .gltf anywhere'
+  setSpeed(0)
+}
+
+// Two grids at the model's lowest point: thin lines + darker ones every 10 cells (1 mm … 10 m, by model size). Lines sit on round numbers.
+function grid(y, c, r) {
+  for (const g of grids) { scene.remove(g); g.geometry.dispose(); g.material.dispose() }
+  const fine = 10 ** Math.floor(Math.log10(r / 20)), big = fine * 10
+  grids = [[fine, 4 * r, 0.22], [big, 40 * r, 0.45]].map(([cell, extent, opacity]) => {
+    const n = 2 * Math.ceil(extent / cell / 2)
+    const g = new THREE.GridHelper(n * cell, n, 0x2b3440, 0x2b3440)
+    Object.assign(g.material, { transparent: true, opacity, depthWrite: false })
+    g.position.set(Math.round(c.x / big) * big, y - r * 1e-4, Math.round(c.z / big) * big)
+    g.visible = !touch
+    scene.add(g)
+    return g
+  })
+}
+
+// Minecraft creative flying: W/S stay level whatever the pitch, Space/Shift go straight up/down.
+let sprint = false, lastW = 0 // Minecraft: double-tap W (and keep holding) = run at 2×
+const keys = new Set(), vel = new THREE.Vector3(), want = new THREE.Vector3(), euler = new THREE.Euler(0, 0, 0, 'YXZ')
+function move(dt) {
+  const k = code => keys.has(code) ? 1 : 0
+  if (walk) return walkMove(dt)
+  const f = clamp(k('KeyW') - k('KeyS') - joy.y, -1, 1), s = clamp(k('KeyD') - k('KeyA') + joy.x, -1, 1), u = k('Space') - (k('ShiftLeft') || k('ShiftRight')) + held.jump - held.down
+  if (dolly && !keys.has('KeyZ')) { // Z let go: back to flying, the FOV stays
+    if (Math.abs(camera.fov - dolly.from.fov) > 0.1) lastDolly = { ...dolly, to: pose() }
+    dolly = null; vel.set(0, 0, 0)
+  }
+  if (dolly) want.subVectors(dolly.p, camera.position).setLength(f) // only W/S, straight at the subject or away
+  else {
+    const yaw = euler.setFromQuaternion(camera.quaternion).y, sin = Math.sin(yaw), cos = Math.cos(yaw)
+    want.set(s * cos - f * sin, 0, -f * cos - s * sin) // forward (-sin, 0, -cos) + right (cos, 0, -sin)
+    if (want.lengthSq() > 1) want.normalize() // diagonals aren't faster
+    want.y = u
+  }
+  vel.lerp(want.multiplyScalar((touch ? FLY : base * 2 ** step) * (sprint && !dolly ? 2 : 1)), 1 - Math.exp(-dt * 10)) // eases in and out over ~0.1 s
+  camera.position.addScaledVector(vel, dt)
+  if (dolly) zoomTo(dolly)
+}
+
+// Dolly zoom (the Vertigo shot): hold Z, then W/S or scroll moves toward/away from the point the crosshair was on, while the FOV
+// changes the other way, so that point keeps its size on screen. k = half the visible height at the subject, kept constant.
+let dolly = null, lastDolly = null, play = null
+const pose = () => ({ pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov })
+const setFov = v => { camera.fov = v; camera.updateProjectionMatrix() }
+const stop = rec => rec?.state === 'recording' && rec.stop() // a replay's video recorder
+function zoomTo({ p, k }) { // the FOV from the distance; the camera stops where the FOV would leave 10°–120°
+  const d = camera.position.distanceTo(p), near = k / Math.tan(rad(60)), far = k / Math.tan(rad(5))
+  if (d < near || d > far) { camera.position.sub(p).setLength(clamp(d, near, far)).add(p); vel.set(0, 0, 0) }
+  setFov(2 * deg(Math.atan(k / camera.position.distanceTo(p))))
+}
+// P: the last dolly zoom again, smooth (3 s, eased in and out), recorded as a video to save (the 3D view only, no HUD)
+function replay() {
+  if (!lastDolly) return msg('Hold Z and press W or S first: P replays that move', false, 3000)
+  stop(play?.rec)
+  play = { ...lastDolly, t0: performance.now() }
+  const type = ['video/mp4;codecs=avc1', 'video/webm'].find(t => window.MediaRecorder?.isTypeSupported(t)) // H.264 .mp4 plays everywhere, QuickTime too
+  if (!type) return
+  const parts = [], rec = play.rec = new MediaRecorder(renderer.domElement.captureStream(60), { mimeType: type })
+  rec.ondataavailable = e => parts.push(e.data)
+  rec.onstop = () => {
+    msg('Dolly zoom replayed. ')
+    $('msg').append(Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob(parts, { type })), download: 'dolly-zoom.' + type.split(/[/;]/)[1], textContent: 'Save it as a video' }))
+  }
+  rec.start()
+}
+
+function setSpeed(n) {
+  step = Math.max(-3, Math.min(3, n))
+  $('speed').value = step
+  $('speedOut').textContent = ['⅛', '¼', '½', '1', '2', '4', '8'][step + 3] + '×'
+}
+
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return keys.clear() // leave browser shortcuts alone; macOS drops key-ups while ⌘ is held
+  keys.add(e.code)
+  if (e.code === 'KeyW' && !e.repeat) { sprint = performance.now() - lastW < 300; lastW = performance.now() }
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract') setSpeed(step - 1)
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') setSpeed(step + 1)
+  if (e.code === 'KeyR' && walk) spawn(0)
+  else if (e.code === 'KeyR') { camera.position.copy(start.pos); camera.quaternion.copy(start.quat); vel.set(0, 0, 0); setFov(60); stop(play?.rec); play = null }
+  if (e.code === 'KeyZ' && !dolly && !play) {
+    if (walk) setFly(true) // a dolly zoom is a camera move: fly for it
+    const p = aim().point
+    dolly = { p, k: camera.position.distanceTo(p) * Math.tan(rad(camera.fov) / 2), from: pose() }; vel.set(0, 0, 0)
+  }
+  if (e.code === 'KeyF') setFov(60)
+  if (e.code === 'KeyP' && !e.repeat) replay()
+  if (e.code === 'KeyT' && !e.repeat) turnProp()
+  if (build) {
+    if (/^Digit[0-9]$/.test(e.code)) pick(+e.code.slice(5) - 1, true)
+    if (e.code === 'KeyE' && !e.repeat) inv()
+    if (e.code === 'Escape' && !$('inv').hidden) inv(false)
+  }
+  if (e.code === 'Space' && !e.repeat && !touch && model.children.length) { if (performance.now() - lastSpace < 300) setFly(walk); lastSpace = performance.now() } // Minecraft: double Space = fly on/off
+  if (e.code === 'Space') e.preventDefault()
+})
+addEventListener('keyup', e => { keys.delete(e.code); if (e.code === 'KeyW') sprint = false })
+addEventListener('blur', () => { keys.clear(); sprint = false })
+
+
+// ---- Phone controls (Minecraft Pocket Edition style) -------------------------------------------------------------------------------
+// Walk mode = gravity + eye height 1.7 m + rays against the map so you can't walk through buildings. Fly mode = the free flight above.
+const joy = { x: 0, y: 0 }, held = { jump: 0, down: 0 }
+const FLY = 8, WALK = 4.3, EYE = 1.7, STEP = 0.5, RADIUS = 0.3
+let walk = touch, foot = 0, vy = 0, grounded = false, solids = []
+const rc = new THREE.Raycaster(), DOWN = new THREE.Vector3(0, -1, 0), o3 = new THREE.Vector3(), d3 = new THREE.Vector3()
+// Places to jump to (phone MAP button): [name, x, z, yaw°], read from the 3D file (scene extras "walk_viewer": {"title", "places"},
+// written by map_pieces.py / make_sample.py). No places: one start spot at the edge of the world, looking at its centre.
+let PLACES = []
+// Walking needs something to stand on: an invisible floor at the model's lowest point, a bit wider than the model.
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial())
+function collect() {
+  solids = []; model.updateMatrixWorld(true); model.traverse(o => o.isMesh && !/^(Label|Crosswalk)/.test(o.name) && solids.push(o))
+  const b = new THREE.Box3().setFromObject(model), m = Math.max(10, radius * 3)
+  if (!b.isEmpty()) { floor.position.set((b.min.x + b.max.x) / 2, b.min.y, (b.min.z + b.max.z) / 2); floor.scale.set(b.max.x - b.min.x + 2 * m, 1, b.max.z - b.min.z + 2 * m); floor.updateMatrixWorld(); solids.push(floor) }
+}
+function groundAt(x, y, z) { // height of the first surface below (x, y, z), or undefined
+  rc.set(o3.set(x, y, z), DOWN); rc.far = 30
+  return rc.intersectObjects(solids, false)[0]?.point.y
+}
+function wallAhead(dx, dz) { // something in the way at knee/hip and head height?
+  d3.set(dx, 0, dz); const len = d3.length(); if (!len) return false
+  d3.divideScalar(len)
+  for (const h of [STEP, EYE - 0.2]) { rc.set(o3.set(camera.position.x, foot + h, camera.position.z), d3); rc.far = len + RADIUS; if (rc.intersectObjects(solids, false).length) return true }
+  return false
+}
+function walkMove(dt) {
+  const k = code => keys.has(code) ? 1 : 0, p = camera.position
+  const f = clamp(k('KeyW') - k('KeyS') - joy.y, -1, 1), s = clamp(k('KeyD') - k('KeyA') + joy.x, -1, 1)
+  const yaw = euler.setFromQuaternion(camera.quaternion).y, sin = Math.sin(yaw), cos = Math.cos(yaw)
+  want.set(s * cos - f * sin, 0, -f * cos - s * sin)
+  if (want.lengthSq() > 1) want.normalize()
+  want.multiplyScalar(WALK * dt * (sprint || keys.has('ShiftLeft') ? 2 : 1))
+  if (want.lengthSq()) for (const [dx, dz] of [[want.x, 0], [0, want.z]]) { // each axis alone, so you slide along a wall
+    if (!dx && !dz || wallAhead(dx, dz)) continue
+    if (groundAt(p.x + dx, foot + STEP, p.z + dz) === undefined) continue // the edge of the map
+    p.x += dx; p.z += dz
+  }
+  if ((held.jump || keys.has('Space')) && grounded) vy = 7 // about 1.1 m up
+  vy -= 22 * dt; foot += vy * dt
+  const g = groundAt(p.x, foot + STEP, p.z)
+  if (g !== undefined && foot <= g) { foot = g; vy = 0; grounded = true } else grounded = false
+  if (foot < floor.position.y - 30) spawn(0)
+  p.y = foot + EYE
+}
+function spawn(i) {
+  let [, x, z, yaw] = PLACES[i] ?? []
+  if (x === undefined) { const c = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3()); [x, z] = [start.pos.x, start.pos.z]; yaw = deg(Math.atan2(x - c.x, z - c.z)) } // the edge, facing the middle
+  collect(); foot = groundAt(x, floor.position.y + radius * 4 + 50, z) ?? floor.position.y; vy = 0
+  camera.position.set(x, foot + EYE, z)
+  camera.quaternion.setFromEuler(euler.set(0, rad(yaw), 0))
+  setFov(60); vel.set(0, 0, 0)
+  bar?.querySelectorAll('button').forEach((b, n) => b.classList.toggle('sel', n === i))
+}
+function setFly(on) {
+  walk = !on
+  if (walk) { foot = camera.position.y - EYE; vy = 0 }
+  $('fly').textContent = 'FLY: ' + (on ? 'ON' : 'OFF'); $('fly').classList.toggle('on', on)
+  document.body.classList.toggle('flying', on)
+  $('jump').textContent = on ? 'UP' : 'JUMP'
+}
+
+const bar = $('bar')
+function drawPlaces() {
+  bar.replaceChildren(...PLACES.map(([name], i) => {
+    const b = document.createElement('button')
+    b.innerHTML = `<b>${i + 1}</b>${name}`
+    b.onpointerdown = e => { e.preventDefault(); spawn(i); setFly(false); document.body.classList.remove('places') }
+    return b
+  }))
+  document.body.classList.toggle('noplaces', !PLACES.length)
+}
+const press = (el, key) => { // a held on-screen button
+  el.onpointerdown = e => { e.preventDefault(); el.setPointerCapture(e.pointerId); held[key] = 1; el.classList.add('on') }
+  el.onpointerup = el.onpointercancel = () => { held[key] = 0; el.classList.remove('on') }
+}
+press($('jump'), 'jump'); press($('down'), 'down')
+$('fly').onpointerdown = e => { e.preventDefault(); setFly(walk) }
+
+// Left 40% of the screen = joystick (appears where the thumb lands), the rest = drag to look. Each finger keeps its own job by pointer id.
+let joyId = null, lookId = null, joyC = null, lookP = null, lookT = null
+const joyEl = $('joy'), knob = joyEl.querySelector('i'), pad = $('pad'), JR = 50
+pad.onpointerdown = e => {
+  e.preventDefault(); pad.setPointerCapture(e.pointerId)
+  $('tip').style.opacity = 0
+  if (e.clientX < innerWidth * 0.4 && joyId === null) {
+    joyId = e.pointerId; joyC = [e.clientX, e.clientY]
+    Object.assign(joyEl.style, { left: e.clientX - 62 + 'px', top: e.clientY - 62 + 'px', bottom: 'auto' })
+  } else if (lookId === null) { lookId = e.pointerId; lookP = [e.clientX, e.clientY]; lookT = { t0: performance.now(), x: e.clientX, y: e.clientY, moved: false } }
+}
+pad.onpointermove = e => {
+  if (e.pointerId === joyId) {
+    const dx = e.clientX - joyC[0], dy = e.clientY - joyC[1], l = Math.hypot(dx, dy), k = l > JR ? JR / l : 1
+    joy.x = dx * k / JR; joy.y = dy * k / JR
+    knob.style.transform = `translate(${dx * k}px, ${dy * k}px)`
+  } else if (e.pointerId === lookId) {
+    const sens = 0.0045 * look.value / 0.7
+    euler.setFromQuaternion(camera.quaternion)
+    euler.y -= (e.clientX - lookP[0]) * sens; euler.x = clamp(euler.x - (e.clientY - lookP[1]) * sens, -1.5, 1.5); euler.z = 0
+    camera.quaternion.setFromEuler(euler); lookP = [e.clientX, e.clientY]
+    if (Math.hypot(e.clientX - lookT.x, e.clientY - lookT.y) > 12) lookT.moved = true
+  }
+}
+pad.onpointerup = pad.onpointercancel = e => {
+  if (e.pointerId === joyId) { joyId = null; joy.x = joy.y = 0; knob.style.transform = ''; Object.assign(joyEl.style, { left: '', top: '', bottom: '' }) }
+  if (e.pointerId === lookId) { lookId = null; if (build && !lookT.moved && performance.now() - lookT.t0 < HOLD) place() } // a tap places
+}
+addEventListener('contextmenu', e => (touch || build) && e.preventDefault())
+if (touch) { document.addEventListener('gesturestart', e => e.preventDefault()) }
+
+// ---- Build mode (v4): Minecraft creative on the map ------------------------------------------------------------------------------
+// Pieces = nodes with userData.piece (map_pieces.py groups the map in Blender: whole buildings, plus parts like fire escapes that hang
+// under their building). Hold to break the piece you aim at (a part alone, or the building with what's still on it); it goes into the
+// hotbar. Pick a slot and place it: it snaps to the 1 m grid, its front (the street side, +z) turned toward you in 90° steps.
+// Creative: E lists every kind of piece, endless copies. Changes stay only after Save (this browser); a reload without Save drops them.
+const BREAK = 0.6, HOLD = 250, KINDS = new Map(), kindOf = n => n.replace(/^Park-side/, 'Street').replace(/ (\d+|[A-Z])$/, '')
+const START_HOT = ['Bodega', 'Café', 'Brownstone', 'Walk-up', 'Street tree', 'Park tree', 'Crosswalk light', 'Fire hydrant', 'Café table']
+let build = null, brk = null, mouseHeld = false, lastSpace = 0, boxes = []
+const ghost = new THREE.Group(), OK = 0x4ade80, NO = 0xef4444
+const gMat = new THREE.MeshBasicMaterial({ color: OK, transparent: true, opacity: 0.35, depthWrite: false })
+const cells = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: OK, transparent: true, opacity: 0.5, depthWrite: false }))
+const outline = new THREE.Box3Helper(new THREE.Box3(), 0x111111)
+ghost.add(cells); scene.add(ghost, outline); ghost.visible = outline.visible = false
+
+function initBuild(names) {
+  const originals = new Map()
+  model.updateMatrixWorld(true)
+  model.traverse(o => o.userData.piece && originals.set(o.userData.piece, { obj: o, parent: o.parent }))
+  build = null; KINDS.clear(); document.body.classList.toggle('build', originals.size > 0)
+  if (!originals.size) return
+  for (const [name, { obj }] of originals) if (!KINDS.has(kindOf(name))) KINDS.set(kindOf(name), template(obj))
+  thumbs()
+  const hot = START_HOT.filter(k => KINDS.has(k)); while (hot.length < 9) hot.push(null)
+  build = { originals, removed: new Set(), placed: [], hot, sel: -1, dirty: false, key: 'walkBuild:' + names }
+  ghost.userData = {}
+  apply(JSON.parse(localStorage[build.key] || '{"removed":[],"placed":[]}'))
+  drawHot()
+}
+function template(obj) { // a copy of the piece standing on the origin: footprint centred, bottom at y 0, front +z as in the map
+  const c = obj.clone(), t = new THREE.Group(), lo = new THREE.Vector3()
+  obj.matrixWorld.decompose(c.position, c.quaternion, c.scale)
+  const b = new THREE.Box3().setFromObject(t.add(c)), mid = b.getCenter(new THREE.Vector3())
+  c.position.sub(lo.set(mid.x, b.min.y, mid.z))
+  t.userData.size = b.getSize(new THREE.Vector3())
+  return t
+}
+function thumbs() { // a small picture of each kind for the hotbar, drawn once with the main renderer in the bottom-left corner
+  const s = new THREE.Scene(), cam = new THREE.PerspectiveCamera(30, 1), N = 96, pr = renderer.getPixelRatio(), cv = renderer.domElement
+  s.environment = scene.environment; s.background = new THREE.Color(0x8b8b8b); s.add(sun.clone())
+  const out = Object.assign(document.createElement('canvas'), { width: N * pr, height: N * pr }), ctx = out.getContext('2d')
+  renderer.setScissorTest(true); renderer.setViewport(0, 0, N, N); renderer.setScissor(0, 0, N, N)
+  for (const t of KINDS.values()) {
+    const m = t.clone(); s.add(m)
+    const { center: c, radius: r } = new THREE.Box3().setFromObject(m).getBoundingSphere(new THREE.Sphere())
+    cam.position.copy(c).addScaledVector(new THREE.Vector3(0.6, 0.45, 1).normalize(), r / Math.sin(rad(15)))
+    cam.lookAt(c); cam.near = r / 50; cam.far = r * 10; cam.updateProjectionMatrix()
+    renderer.render(s, cam)
+    ctx.drawImage(cv, 0, cv.height - N * pr, N * pr, N * pr, 0, 0, out.width, out.height)
+    t.userData.thumb = out.toDataURL(); s.remove(m)
+  }
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight)
+}
+
+function drawHot() {
+  const more = Object.assign(document.createElement('button'), { className: 'slot more', textContent: '⋯', title: 'All pieces (E)' })
+  more.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); inv() }
+  const hand = Object.assign(document.createElement('button'), { className: 'slot more' + (build.sel < 0 ? ' sel' : ''), innerHTML: '<span>0</span>✋', title: 'Empty hand (0)' })
+  hand.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); pick(-1) }
+  $('hot').replaceChildren(hand, ...build.hot.map((k, i) => {
+    const b = Object.assign(document.createElement('button'), { className: 'slot' + (i === build.sel ? ' sel' : ''), title: k ?? '', innerHTML: `<span>${i + 1}</span>` })
+    if (k) b.style.backgroundImage = `url(${KINDS.get(k).userData.thumb})`
+    b.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); pick(i, true) }
+    return b
+  }), more)
+  $('hotName').textContent = build.hot[build.sel] ?? 'Empty hand'
+  $('save').classList.toggle('dirty', build.dirty); $('save').textContent = build.dirty ? 'Save •' : 'Save'
+}
+// -1 = empty hand (nothing to place, no ghost). The slot you already hold, picked again (key or tap) = empty hand. Scroll goes through it.
+const pick = (i, toggle) => { build.sel = toggle && i === build.sel ? -1 : (i + 11) % 10 - 1; drawHot() }
+function inv(open = $('inv').hidden) { // all pieces: click one to put it in the selected slot
+  $('inv').hidden = !open
+  if (!open) return touch || controls.lock()
+  controls.unlock()
+  $('invGrid').replaceChildren(...[...KINDS].map(([k, t]) => {
+    const b = Object.assign(document.createElement('button'), { className: build.hot[build.sel] === k ? 'on' : '', innerHTML: `<img alt="" src="${t.userData.thumb}">${k}` })
+    b.onclick = () => { if (build.sel < 0) build.sel = Math.max(0, build.hot.indexOf(null)); build.hot[build.sel] = k; drawHot(); inv(false) }
+    return b
+  }))
+}
+$('invX').onclick = () => inv(false)
+$('inv').onpointerdown = e => e.target === $('inv') && inv(false)
+$('save').onclick = e => { e.currentTarget.blur(); save() }
+$('reset').onclick = e => { e.currentTarget.blur(); startOver() }
+$('map').onpointerdown = e => { e.preventDefault(); document.body.classList.toggle('places') }
+
+function save() {
+  localStorage[build.key] = JSON.stringify({ removed: [...build.removed], placed: build.placed })
+  build.dirty = false; drawHot(); msg('Saved. Your street stays like this after a reload.', false, 2500)
+}
+function startOver() { apply({ removed: [], placed: [] }); build.dirty = true; drawHot(); msg('Original street back. Press Save to keep it.', false, 3000) }
+function apply(state) { // the original street, then the saved breaks and places
+  for (const o of [...model.children]) if (o.userData.placed) model.remove(o)
+  for (const { obj, parent } of build.originals.values()) if (obj.parent !== parent) parent.add(obj)
+  build.removed = new Set(state.removed); build.placed = []
+  for (const n of build.removed) { const o = build.originals.get(n)?.obj; o?.parent?.remove(o) }
+  for (const rec of state.placed) addPlaced(rec)
+  refresh()
+}
+function refresh() { // after any change: walls for walking, boxes for "does it fit"
+  collect()
+  boxes = []; model.traverse(o => o.userData.piece && boxes.push(new THREE.Box3().setFromObject(o)))
+}
+const changed = () => { build.dirty = true; refresh(); drawHot() }
+
+function addPlaced(rec) {
+  const t = KINDS.get(rec.kind); if (!t) return
+  const g = t.clone(); g.position.set(rec.x, rec.y, rec.z); g.rotation.y = rec.r * Math.PI / 2
+  g.userData = { piece: rec.kind, placed: rec }
+  model.add(g); build.placed.push(rec)
+}
+function breakPiece(o) {
+  const k = o.userData.placed ? o.userData.piece : kindOf(o.userData.piece)
+  if (o.userData.placed) build.placed.splice(build.placed.indexOf(o.userData.placed), 1)
+  else build.removed.add(o.userData.piece)
+  o.parent.remove(o)
+  if (!build.hot.includes(k)) build.hot[build.sel < 0 || build.hot[build.sel] ? (build.hot.includes(null) ? build.hot.indexOf(null) : 8) : build.sel] = k // into the hotbar
+  if (build.sel >= 0) build.sel = build.hot.indexOf(k) // holding something: now you hold it; empty hand stays empty
+  changed(); msg(`${k} → hotbar slot ${build.sel + 1}`, false, 1500)
+}
+function place() {
+  if (!ghost.visible) return
+  if (!ghost.userData.ok) return msg('Something is in the way', true, 1200)
+  addPlaced({ ...ghost.userData.rec }); changed()
+  ghost.userData.placedAt = JSON.stringify(ghost.userData.rec) // hide the ghost on what you just placed, until you aim elsewhere
+}
+
+function hit() { // the first real surface under the crosshair: not see-through walls or the floating labels
+  camera.updateMatrixWorld(); ray.setFromCamera(mid, camera); ray.far = 150
+  const h = ray.intersectObject(model).find(h => h.object.isMesh && !h.object.userData.wall && !/^Label/.test(h.object.name))
+  ray.far = Infinity
+  return h
+}
+function pieceOf(o) { // what breaks: a placed copy as a whole, else the nearest piece (a fire escape alone, or the building)
+  let p = null
+  for (; o && o !== model; o = o.parent) { if (o.userData.placed) return o; p ??= o.userData.piece ? o : null }
+  return p
+}
+const nh = new THREE.Vector3(), gb = new THREE.Box3(), me = new THREE.Box3()
+function updateGhost(h) {
+  const k = build.hot[build.sel], u = ghost.userData
+  ghost.visible = false
+  if (!k || !h) return
+  if (u.k !== k) { // a see-through copy of the piece in the slot
+    u.shape && ghost.remove(u.shape)
+    u.shape = KINDS.get(k).clone(); u.shape.traverse(o => { if (o.isMesh) o.material = gMat }); ghost.add(u.shape); u.k = k
+  }
+  const p = h.point.clone(), s = KINDS.get(k).userData.size
+  const r = (Math.round(Math.atan2(camera.position.x - p.x, camera.position.z - p.z) / (Math.PI / 2)) % 4 + 4) % 4 // front toward you
+  const [w, d] = r % 2 ? [s.z, s.x] : [s.x, s.z], n = Math.max(1, Math.ceil(w - 0.01)), m = Math.max(1, Math.ceil(d - 0.01)) // whole 1 m cells
+  nh.copy(h.face.normal).transformDirection(h.object.matrixWorld)
+  let y = p.y, ax, az
+  if (nh.y < 0.5) { // aimed at a wall: on the ground, against that wall, growing out of it
+    [ax, az] = Math.abs(nh.x) > Math.abs(nh.z) ? [Math.sign(nh.x), 0] : [0, Math.sign(nh.z)]
+    p.x += ax * 0.05; p.z += az * 0.05; y = groundAt(p.x, p.y + 0.05, p.z) ?? 0
+  } else [ax, az] = [-Math.round(Math.sin(r * Math.PI / 2)), -Math.round(Math.cos(r * Math.PI / 2))] // on the ground: its front edge where you aim, the rest away from you
+  const x = Math.round(p.x + ax * n / 2 - n / 2) + n / 2, z = Math.round(p.z + az * m / 2 - m / 2) + m / 2
+  y = Math.round(y * 1000) / 1000
+  u.shape.position.set(x, y, z); u.shape.rotation.y = r * Math.PI / 2
+  cells.position.set(x, y + 0.03, z); cells.scale.set(n, 1, m)
+  const size = 2 * Math.ceil((Math.max(n, m) + 6) / 2) // the 1 m grid around it, lines on whole metres
+  if (u.size !== size) { u.grid && ghost.remove(u.grid); u.grid = new THREE.GridHelper(size, size, 0xffffff, 0xffffff); Object.assign(u.grid.material, { transparent: true, opacity: 0.55, depthWrite: false }); ghost.add(u.grid); u.size = size }
+  u.grid.position.set(Math.round(x), y + 0.025, Math.round(z))
+  gb.setFromObject(u.shape).expandByScalar(-0.05)
+  const cp = camera.position; me.min.set(cp.x - RADIUS, cp.y - EYE, cp.z - RADIUS); me.max.set(cp.x + RADIUS, cp.y + 0.1, cp.z + RADIUS)
+  u.ok = !gb.intersectsBox(me) && !boxes.some(b => b.intersectsBox(gb))
+  gMat.color.set(u.ok ? OK : NO); cells.material.color.set(u.ok ? OK : NO)
+  u.rec = { kind: k, x, y, z, r }
+  ghost.visible = JSON.stringify(u.rec) !== u.placedAt
+}
+function buildTick(dt) {
+  const active = (touch || controls.isLocked) && $('inv').hidden && !play
+  const h = active ? hit() : null, target = h && pieceOf(h.object)
+  const holding = touch ? lookId !== null && !lookT.moved && performance.now() - lookT.t0 > HOLD : mouseHeld
+  outline.visible = !!target; if (target) outline.box.setFromObject(target)
+  if (holding && target) {
+    if (brk?.target !== target) brk = { target, t: 0 }
+    if ((brk.t += dt) >= BREAK) { breakPiece(target); brk = null }
+  } else brk = null
+  updateGhost(holding ? null : h)
+  $('ring').style.setProperty('--p', brk ? Math.min(brk.t / BREAK, 1) : 0)
+}
+addEventListener('mousedown', e => { if (!build || !controls.isLocked) return; if (e.button === 0) mouseHeld = true; if (e.button === 2) place() })
+addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false })
+controls.addEventListener('unlock', () => { mouseHeld = false })
+
+let wheel = 0, wheelWait = 0 // scroll = speed (like Minecraft spectator). Trackpads send many small events, so add them up and pause after each step.
+addEventListener('wheel', e => {
+  if (dolly) return camera.position.sub(dolly.p).multiplyScalar(Math.exp(e.deltaY * (e.deltaMode ? 0.04 : 0.0015))).add(dolly.p) // Z held: scroll dollies
+  if (performance.now() < wheelWait) return
+  wheel += e.deltaY * (e.deltaMode ? 40 : 1)
+  if (Math.abs(wheel) < 60) return
+  build ? pick(build.sel + Math.sign(wheel)) : setSpeed(step - Math.sign(wheel)); wheel = 0; wheelWait = performance.now() + 180
+}, { passive: true })
+
+$('speed').oninput = e => setSpeed(+e.target.value)
+const look = $('look')
+look.value = localStorage.walkLook || 0.7
+look.oninput = () => { controls.pointerSpeed = +look.value; $('lookOut').textContent = (+look.value).toFixed(1); localStorage.walkLook = look.value }
+look.oninput()
+
+if (!touch) renderer.domElement.addEventListener('click', () => controls.lock())
+controls.addEventListener('lock', () => document.body.classList.add('locked'))
+controls.addEventListener('unlock', () => document.body.classList.remove('locked'))
+document.addEventListener('pointerlockerror', () => msg('The browser blocked mouse look. Click the view again.', true, 3000))
+
+// Drag and drop, or the Open button. Several files load together; a .gltf needs its .bin and textures dropped with it.
+function openFiles(files) {
+  const models = files.filter(f => /\.(glb|gltf|json)$/i.test(f.name))
+  if (!models.length) return msg('Drop a .glb or .gltf file (a .gltf with its .bin and textures), or a StoryArc floorplan .json', true, 4000)
+  blobs.forEach(u => URL.revokeObjectURL(u))
+  blobs = new Map(files.map(f => [f.name, URL.createObjectURL(f)]))
+  load(models.map(f => ({ name: f.name, url: blobs.get(f.name) })))
+}
+addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drag') })
+addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('drag') })
+addEventListener('drop', e => { e.preventDefault(); document.body.classList.remove('drag'); openFiles([...e.dataTransfer.files]) })
+$('open').onclick = e => { e.currentTarget.blur(); $('file').click() } // blur, or Space would press the button again
+$('file').onchange = e => { openFiles([...e.target.files]); e.target.value = '' }
+
+let msgTimer
+function msg(text, err = false, ms = 0) {
+  const m = $('msg')
+  m.textContent = text; m.classList.toggle('err', err); m.hidden = !text
+  clearTimeout(msgTimer); if (ms) msgTimer = setTimeout(() => m.hidden = true, ms)
+}
+
+let last = performance.now(), shown = ''
+renderer.setAnimationLoop(t => {
+  const dt = Math.min((t - last) / 1000, 0.1); last = t
+  if (play) { // P: replaying the last dolly zoom
+    const a = Math.min((t - play.t0) / 3000, 1), e = a * a * (3 - 2 * a)
+    camera.position.lerpVectors(play.from.pos, play.to.pos, e); camera.quaternion.slerpQuaternions(play.from.quat, play.to.quat, e)
+    zoomTo(play)
+    if (a === 1) { const r = play.rec; setTimeout(() => stop(r), 300); play = null } // the video holds the last frame a moment
+  } else move(dt)
+  if (build) buildTick(dt)
+  renderer.render(scene, camera)
+  const p = camera.position, z = model.userData.storyArc ? -p.z : p.z, d = unit[1] === 100 ? 1 : 2, n = v => (v * unit[1]).toFixed(d)
+  const w = `you are at  x ${n(p.x)}  y ${n(p.y)}  z ${n(z)} ${unit[0]}\nFOV ${camera.fov.toFixed(0)}° · ${camera.getFocalLength().toFixed(0)} mm lens` +
+    (dolly ? ` · dolly zoom, subject ${n(p.distanceTo(dolly.p))} ${unit[0]} away` : play ? ' · replaying' : '')
+  if (w !== shown) $('where').textContent = shown = w
+})
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight) })
+
+// ?model=<path or URL>, repeatable. A full path (/Users/…) is read through the local server's /fs/.
+const toUrl = p => /^(https?|blob|data):/.test(p) ? p : (p.startsWith('/') ? '/fs' : '') + p.split('/').map(encodeURIComponent).join('/')
+let startCam = new URLSearchParams(location.search).get('cam')?.split(',').map(Number).filter(Number.isFinite); if (!(startCam?.length >= 5)) startCam = null
+const asked = new URLSearchParams(location.search).getAll('model')
+if (!asked.length) asked.push(DEFAULT_WORLD) // nothing asked: open the example world
+const viewer = window.viewer = { THREE, scene, camera, controls, load, aim, spawn, setFly, joy, get foot() { return foot }, get walk() { return walk }, get model() { return model }, get build() { return build }, ghost, hit, pieceOf, breakPiece, place, pick, save, startOver, inv, get speed() { return base * 2 ** step }, loaded: '' } // handle for tests and for Claude
+frame('')
+if (asked.length) load(asked.map(p => ({ name: p.split('/').pop(), url: toUrl(p) })))
+</script>
+</body>
+</html>
